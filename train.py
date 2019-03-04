@@ -1,18 +1,18 @@
 #!/usr/bin/env python
 
 import argparse
-import ncluster
 import os
+import socket
+import subprocess
 
-IMAGE_NAME = 'pytorch.imagenet.source.v7'
-INSTANCE_TYPE = 'p3.16xlarge'
-NUM_GPUS = 8
+# IMAGE_NAME = 'pytorch.imagenet.source.v7'
+# INSTANCE_TYPE = 'p3.16xlarge'
+NUM_GPUS = 1
 
-ncluster.set_backend('aws')
 parser = argparse.ArgumentParser()
-parser.add_argument('--name', type=str, default='imagenet',
+parser.add_argument('--name', type=str, default='debug_run',
                     help="name of the current run, used for machine naming and tensorboard visualization")
-parser.add_argument('--machines', type=int, default=16,
+parser.add_argument('--machines', type=int, default=1,
                     help="how many machines to use")
 args = parser.parse_args()
 
@@ -23,10 +23,10 @@ lr = 1.0
 bs = [512, 224, 128] # largest batch size that fits in memory for each image size
 bs_scale = [x/bs[0] for x in bs]
 one_machine = [
-  {'ep':0,  'sz':128, 'bs':bs[0], 'trndir':'-sz/160'},
+  {'ep':0,  'sz':128, 'bs':bs[0]}, #, 'trndir':'-sz/160'
   {'ep':(0,7),  'lr':(lr,lr*2)}, # lr warmup is better with --init-bn0
   {'ep':(7,13), 'lr':(lr*2,lr/4)}, # trying one cycle
-  {'ep':13, 'sz':224, 'bs':bs[1], 'trndir':'-sz/352', 'min_scale':0.087},
+  {'ep':13, 'sz':224, 'bs':bs[1], 'min_scale':0.087}, # , 'trndir':'-sz/352'
   {'ep':(13,22),'lr':(lr*bs_scale[1],lr/10*bs_scale[1])},
   {'ep':(22,25),'lr':(lr/10*bs_scale[1],lr/100*bs_scale[1])},
   {'ep':25, 'sz':288, 'bs':bs[2], 'min_scale':0.5, 'rect_val':True},
@@ -104,44 +104,44 @@ schedules = {1: one_machine,
 def get_nccl_params(num_tasks, num_gpus):
   if num_tasks <= 1:
     return 'NCCL_DEBUG=VERSION'
-  nccl_rings = get_nccl_rings(num_tasks, num_gpus)
-  return f'NCCL_RINGS="{nccl_rings}" NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION'
-  # return 'NCCL_MIN_NRINGS=2 NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION'
+#   nccl_rings = get_nccl_rings(num_tasks, num_gpus)
+#   return f'NCCL_RINGS="{nccl_rings}" NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION'
+#   # return 'NCCL_MIN_NRINGS=2 NCCL_SINGLE_RING_THRESHOLD=10 NCCL_DEBUG=VERSION'
 
 
-def get_nccl_rings(num_tasks, num_gpus):
-  ring = build_ring_order(range(num_tasks), range(num_gpus))
-  ring_rev = build_ring_order(reversed(range(num_tasks)),
-                              reversed(range(num_gpus)))
-  rotated_gpu_order = [3, 2, 1, 0, 7, 6, 5, 4]
-  skip_gpu_order = get_skip_order(num_gpus)
-  if (num_tasks >= 4) and (num_gpus == 8):
-    assert ((num_tasks % 4) == 0)
-    skip_machine_order = get_skip_order(num_tasks)
-    ring_skip = build_ring_order(skip_machine_order, rotated_gpu_order)
-    ring_skip_rev = build_ring_order(reversed(skip_machine_order),
-                                     skip_gpu_order)
-    rings_arr = [ring, ring_rev, ring_skip, ring_skip_rev]
-    # rings_arr = [ring, ring_rev, ring_skip]
-  else:
-    rings_arr = [ring, ring_rev]
-  return ' | '.join(rings_arr)
+# def get_nccl_rings(num_tasks, num_gpus):
+#   ring = build_ring_order(range(num_tasks), range(num_gpus))
+#   ring_rev = build_ring_order(reversed(range(num_tasks)),
+#                               reversed(range(num_gpus)))
+#   rotated_gpu_order = [3, 2, 1, 0, 7, 6, 5, 4]
+#   skip_gpu_order = get_skip_order(num_gpus)
+#   if (num_tasks >= 4) and (num_gpus == 8):
+#     assert ((num_tasks % 4) == 0)
+#     skip_machine_order = get_skip_order(num_tasks)
+#     ring_skip = build_ring_order(skip_machine_order, rotated_gpu_order)
+#     ring_skip_rev = build_ring_order(reversed(skip_machine_order),
+#                                      skip_gpu_order)
+#     rings_arr = [ring, ring_rev, ring_skip, ring_skip_rev]
+#     # rings_arr = [ring, ring_rev, ring_skip]
+#   else:
+#     rings_arr = [ring, ring_rev]
+#   return ' | '.join(rings_arr)
 
 
-def build_ring_order(machine_order, gpu_order):
-  gpu_order = list(gpu_order)
-  machine_order = list(machine_order)
-  ngpus = len(gpu_order)
-  r_order = [(x * ngpus) + y for x in machine_order for y in gpu_order]
-  return ' '.join(map(str, r_order))
+# def build_ring_order(machine_order, gpu_order):
+#   gpu_order = list(gpu_order)
+#   machine_order = list(machine_order)
+#   ngpus = len(gpu_order)
+#   r_order = [(x * ngpus) + y for x in machine_order for y in gpu_order]
+#   return ' '.join(map(str, r_order))
 
 
-def get_skip_order(size):
-  if size == 4:
-    return [0, 2, 1, 3]
-  skip_step = 5 if size == 16 else 3
-  # step size of 3 yields - [0,3,6,1,4,7,2,5]
-  return [(i * skip_step) % size for i in range(size)]
+# def get_skip_order(size):
+#   if size == 4:
+#     return [0, 2, 1, 3]
+#   skip_step = 5 if size == 16 else 3
+#   # step size of 3 yields - [0,3,6,1,4,7,2,5]
+#   return [(i * skip_step) % size for i in range(size)]
 
 
 def format_params(arg):
@@ -152,27 +152,23 @@ def format_params(arg):
 
 
 def main():
-  supported_regions = ['us-west-2', 'us-east-1', 'us-east-2']
-  assert ncluster.get_region() in supported_regions, f"required AMI {IMAGE_NAME} has only been made available in regions {supported_regions}, but your current region is {ncluster.get_region()}"
-  assert args.machines in schedules, f"{args.machines} not supported, only support {schedules.keys()}"
-
-  os.environ['NCLUSTER_AWS_FAST_ROOTDISK'] = '1'  # use io2 disk on AWS
-  job = ncluster.make_job(name=args.name,
-                          run_name=f"{args.name}-{args.machines}",
-                          num_tasks=args.machines,
-                          image_name=IMAGE_NAME,
-                          instance_type=INSTANCE_TYPE,
-                          install_script=open('setup.sh').read())
-  job.upload('training')
-  job.run(f'source activate pytorch_source')
+  # os.environ['NCLUSTER_AWS_FAST_ROOTDISK'] = '1'  # use io2 disk on AWS
+  # job = ncluster.make_job(name=args.name,
+  #                         run_name=f"{args.name}-{args.machines}",
+  #                         num_tasks=args.machines,
+  #                         image_name=IMAGE_NAME,
+  #                         instance_type=INSTANCE_TYPE,
+  #                         install_script=open('setup.sh').read())
+  # job.upload('training')
+  # job.run(f'source activate pytorch_source')
 
   nccl_params = get_nccl_params(args.machines, NUM_GPUS)
 
   # Training script args
   default_params = [
-    '~/data/imagenet',
+    '/data/datasets/imagenet',
     '--fp16',
-    '--logdir', job.logdir,
+    '--logdir', '/data/rohan/debug_run',
     '--distributed',
     '--init-bn0',
     '--no-bn-wd',
@@ -182,14 +178,17 @@ def main():
   training_params = default_params + params
   training_params = ' '.join(map(format_params, training_params))
 
+  i = 0
+  ip = socket.gethostbyname(socket.gethostname())
   # TODO: simplify args processing, or give link to actual commands run
-  for i, task in enumerate(job.tasks):
-    dist_params = f'--nproc_per_node=8 --nnodes={args.machines} --node_rank={i} --master_addr={job.tasks[0].ip} --master_port={6006}'
-    cmd = f'{nccl_params} python -m torch.distributed.launch {dist_params} training/train_imagenet_nv.py {training_params}'
-    task.run(f'echo {cmd} > {job.logdir}/task-{i}.cmd')  # save command-line
-    task.run(cmd, non_blocking=True)
+  dist_params = f'--nproc_per_node={NUM_GPUS} --master_addr={ip} --master_port={6006}'
+  cmd = f'CUDA_VISIBLE_DEVICES=0 {nccl_params} python -m torch.distributed.launch {dist_params} training/train_imagenet_nv.py {training_params}'
+  # print(cmd)
+  subprocess.run(f'echo {cmd} > /data/rohan/debug_run/task-{i}.cmd', shell=True, check=True)  # save command-line
+  print(cmd)
+  print(f"Logging to /data/rohan/debug_run")
+  subprocess.run(cmd, shell=True, check=True)
 
-  print(f"Logging to {job.logdir}")
 
 
 if __name__ == '__main__':

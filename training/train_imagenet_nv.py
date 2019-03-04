@@ -82,20 +82,19 @@ tb = TensorboardLogger(args.logdir, is_master=is_master)
 log = FileLogger(args.logdir, is_master=is_master, is_rank0=is_rank0)
 
 def main():
-    os.system('shutdown -c')  # cancel previous shutdown command
+    # os.system('shutdown -c')  # cancel previous shutdown command
     log.console(args)
     tb.log('sizes/world', dist_utils.env_world_size())
 
     # need to index validation directory before we start counting the time
-    dataloader.sort_ar(args.data+'/validation')
+    dataloader.sort_ar(args.data+'/val-scaled')
     
     if args.distributed:
         log.console('Distributed initializing process group')
         torch.cuda.set_device(args.local_rank)
-        dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=dist_utils.env_world_size())
+        dist.init_process_group(backend=args.dist_backend)
         assert(dist_utils.env_world_size() == dist.get_world_size())
         log.console("Distributed: success (%d/%d)"%(args.local_rank, dist.get_world_size()))
-
 
     log.console("Loading model")
     model = resnet.resnet50(bn0=args.init_bn0).cuda()
@@ -327,8 +326,8 @@ class DataManager():
     def expand_directories(self, phase):
         trndir = phase.get('trndir', '')
         valdir = phase.get('valdir', trndir)
-        phase['trndir'] = args.data+trndir+'/train'
-        phase['valdir'] = args.data+valdir+'/validation'
+        phase['trndir'] = args.data+trndir+'/train-scaled'
+        phase['valdir'] = args.data+valdir+'/val-scaled'
 
     def preload_data(self, ep, sz, bs, trndir, valdir, **kwargs): # dummy ep var to prevent error
         if 'lr' in kwargs: del kwargs['lr'] # in case we mix schedule and data phases
