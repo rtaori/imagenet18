@@ -7,7 +7,7 @@ import subprocess
 
 # IMAGE_NAME = 'pytorch.imagenet.source.v7'
 # INSTANCE_TYPE = 'p3.16xlarge'
-NUM_GPUS = 1
+NUM_GPUS = 4
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--name', type=str, default='debug_run',
@@ -20,7 +20,7 @@ args = parser.parse_args()
 # events: https://s3.amazonaws.com/yaroslavvb/logs/imagenet-1
 # logs: https://s3.amazonaws.com/yaroslavvb/logs/imagenet1.tar
 lr = 1.0
-bs = [512, 224, 128] # largest batch size that fits in memory for each image size
+bs = [224, 128, 128] # largest batch size that fits in memory for each image size
 bs_scale = [x/bs[0] for x in bs]
 one_machine = [
   {'ep':0,  'sz':128, 'bs':bs[0]}, #, 'trndir':'-sz/160'
@@ -29,7 +29,7 @@ one_machine = [
   {'ep':13, 'sz':224, 'bs':bs[1], 'min_scale':0.087}, # , 'trndir':'-sz/352'
   {'ep':(13,22),'lr':(lr*bs_scale[1],lr/10*bs_scale[1])},
   {'ep':(22,25),'lr':(lr/10*bs_scale[1],lr/100*bs_scale[1])},
-  {'ep':25, 'sz':288, 'bs':bs[2], 'min_scale':0.5, 'rect_val':True},
+  {'ep':25, 'sz':224, 'bs':bs[2], 'min_scale':0.5, 'rect_val':True},
   {'ep':(25,28),'lr':(lr/100*bs_scale[2],lr/1000*bs_scale[2])}
 ]
 
@@ -182,7 +182,7 @@ def main():
   ip = socket.gethostbyname(socket.gethostname())
   # TODO: simplify args processing, or give link to actual commands run
   dist_params = f'--nproc_per_node={NUM_GPUS} --master_addr={ip} --master_port={6006}'
-  cmd = f'CUDA_VISIBLE_DEVICES=0 {nccl_params} python -m torch.distributed.launch {dist_params} training/train_imagenet_nv.py {training_params}'
+  cmd = f'CUDA_VISIBLE_DEVICES=0,1,2,3 {nccl_params} python -m torch.distributed.launch {dist_params} training/train_imagenet_nv.py {training_params}'
   # print(cmd)
   subprocess.run(f'echo {cmd} > /data/rohan/debug_run/task-{i}.cmd', shell=True, check=True)  # save command-line
   print(cmd)

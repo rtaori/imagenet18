@@ -168,6 +168,8 @@ def train(trn_loader, model, criterion, optimizer, scheduler, epoch):
         scheduler.update_lr(epoch, i+1, len(trn_loader))
 
         # compute output
+        if i == 0:
+            print("in epoch {epoch}, input shape is:", input.shape)
         output = model(input)
         loss = criterion(output, target)
 
