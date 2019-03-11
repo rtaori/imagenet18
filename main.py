@@ -374,7 +374,7 @@ def validate(val_loader, model, criterion):
         target = data[0]["label"].squeeze().cuda().long()
         val_loader_len = int(val_loader._size / args.batch_size)
 
-        target = target.cuda(async=True)
+        target = target.cuda()
         input_var = Variable(input)
         target_var = Variable(target)
 
