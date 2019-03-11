@@ -85,9 +85,6 @@ def main():
     # os.system('shutdown -c')  # cancel previous shutdown command
     log.console(args)
     tb.log('sizes/world', dist_utils.env_world_size())
-
-    # need to index validation directory before we start counting the time
-    dataloader.sort_ar(args.data+'/val-scaled')
     
     if args.distributed:
         log.console('Distributed initializing process group')
@@ -292,6 +289,7 @@ def distributed_predict(input, target, model, criterion):
 class DataManager():
     def __init__(self, phases):
         self.phases = self.preload_phase_data(phases)
+
     def set_epoch(self, epoch):
         cur_phase = self.get_phase(epoch)
         if cur_phase: self.set_data(cur_phase)

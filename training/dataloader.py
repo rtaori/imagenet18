@@ -16,10 +16,10 @@ import pickle
 from tqdm import tqdm
 from dist_utils import env_world_size, env_rank
 
-def get_loaders(traindir, valdir, sz, bs, fp16=True, val_bs=None, workers=8, rect_val=False, min_scale=0.08, distributed=False):
+def get_loaders(traindir, valdir, sz, bs, fp16=True, val_bs=None, workers=8, distributed=False):
     val_bs = val_bs or bs
     train_tfms = [
-            transforms.RandomResizedCrop(sz, scale=(min_scale, 1.0)),
+            transforms.RandomResizedCrop(sz),
             transforms.RandomHorizontalFlip()
     ]
     train_dataset = datasets.ImageFolder(traindir, transforms.Compose(train_tfms))
@@ -42,17 +42,7 @@ def get_loaders(traindir, valdir, sz, bs, fp16=True, val_bs=None, workers=8, rec
     return train_loader, val_loader, train_sampler, val_sampler
 
 
-def create_validation_set(valdir, batch_size, target_size, rect_val, distributed):
-    if rect_val:
-        idx_ar_sorted = sort_ar(valdir)
-        idx_sorted, _ = zip(*idx_ar_sorted)
-        idx2ar = map_idx2ar(idx_ar_sorted, batch_size)
-
-        ar_tfms = [transforms.Resize(int(target_size*1.14)), CropArTfm(idx2ar, target_size)]
-        val_dataset = ValDataset(valdir, transform=ar_tfms)
-        val_sampler = DistValSampler(idx_sorted, batch_size=batch_size, distributed=distributed)
-        return val_dataset, val_sampler
-    
+def create_validation_set(valdir, batch_size, target_size, distributed):    
     val_tfms = [transforms.Resize(int(target_size*1.14)), transforms.CenterCrop(target_size)]
     val_dataset = datasets.ImageFolder(valdir, transforms.Compose(val_tfms))
     val_sampler = DistValSampler(list(range(len(val_dataset))), batch_size=batch_size, distributed=distributed)
@@ -99,20 +89,6 @@ def fast_collate(batch):
         tensor[i] += torch.from_numpy(nump_array)
     return tensor, targets
 
-class ValDataset(datasets.ImageFolder):
-    def __init__(self, root, transform=None, target_transform=None):
-        super().__init__(root, transform, target_transform)
-    def __getitem__(self, index):
-        path, target = self.imgs[index]
-        sample = self.loader(path)
-        if self.transform is not None:
-            for tfm in self.transform:
-                if isinstance(tfm, CropArTfm): sample = tfm(sample, index)
-                else: sample = tfm(sample)
-        if self.target_transform is not None:
-            target = self.target_transform(target)
-
-        return sample, target
 
 class DistValSampler(Sampler):
     # DistValSampler distrbutes batches equally (based on batch size) to every gpu (even if there aren't enough images)
@@ -143,43 +119,3 @@ class DistValSampler(Sampler):
             yield sampled_indices[offset:offset+self.batch_size]
     def __len__(self): return self.expected_num_batches
     def set_epoch(self, epoch): return
-    
-
-class CropArTfm(object):
-    def __init__(self, idx2ar, target_size):
-        self.idx2ar, self.target_size = idx2ar, target_size
-    def __call__(self, img, idx):
-        target_ar = self.idx2ar[idx]
-        if target_ar < 1: 
-            w = int(self.target_size/target_ar)
-            size = (w//8*8, self.target_size)
-        else: 
-            h = int(self.target_size*target_ar)
-            size = (self.target_size, h//8*8)
-        return torchvision.transforms.functional.center_crop(img, size)
-
-import os.path
-def sort_ar(valdir):
-    idx2ar_file = valdir+'/../sorted_idxar.p'
-    if os.path.isfile(idx2ar_file): return pickle.load(open(idx2ar_file, 'rb'))
-    print('Creating AR indexes. Please be patient this may take a couple minutes...')
-    val_dataset = datasets.ImageFolder(valdir) # AS: TODO: use Image.open instead of looping through dataset
-    sizes = [img[0].size for img in tqdm(val_dataset, total=len(val_dataset))]
-    idx_ar = [(i, round(s[0]/s[1], 5)) for i,s in enumerate(sizes)]
-    sorted_idxar = sorted(idx_ar, key=lambda x: x[1])
-    pickle.dump(sorted_idxar, open(idx2ar_file, 'wb'))
-    print('Done')
-    return sorted_idxar
-
-def chunks(l, n):
-    n = max(1, n)
-    return (l[i:i+n] for i in range(0, len(l), n))
-
-def map_idx2ar(idx_ar_sorted, batch_size):
-    ar_chunks = list(chunks(idx_ar_sorted, batch_size))
-    idx2ar = {}
-    for chunk in ar_chunks:
-        idxs, ars = list(zip(*chunk))
-        mean = round(np.mean(ars), 5)
-        for idx in idxs: idx2ar[idx] = mean
-    return idx2ar
