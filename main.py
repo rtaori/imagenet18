@@ -14,14 +14,12 @@ import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.models as models
 
-
-try:
-    from nvidia.dali.plugin.pytorch import DALIClassificationIterator
-    from nvidia.dali.pipeline import Pipeline
-    import nvidia.dali.ops as ops
-    import nvidia.dali.types as types
-except ImportError:
-    raise ImportError("Please install DALI from https://www.github.com/NVIDIA/DALI to run this example.")
+from apex.parallel import DistributedDataParallel as DDP
+from apex.fp16_utils import *
+from nvidia.dali.plugin.pytorch import DALIClassificationIterator
+from nvidia.dali.pipeline import Pipeline
+import nvidia.dali.ops as ops
+import nvidia.dali.types as types
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
@@ -135,32 +133,9 @@ class HybridValPipe(Pipeline):
 best_prec1 = 0
 args = parser.parse_args()
 
-# test mode, use default args for sanity test
-if args.test:
-    args.fp16 = False
-    args.epochs = 1
-    args.start_epoch = 0
-    args.arch = 'resnet50'
-    args.batch_size = 64
-    args.data = []
-    args.prof = True
-    args.data.append('/data/imagenet/train-jpeg/')
-    args.data.append('/data/imagenet/val-jpeg/')
-
-if not len(args.data):
-    raise Exception("error: too few arguments")
-
 args.distributed = False
 if 'WORLD_SIZE' in os.environ:
     args.distributed = int(os.environ['WORLD_SIZE']) > 1
-
-# make apex optional
-if args.fp16 or args.distributed:
-    try:
-        from apex.parallel import DistributedDataParallel as DDP
-        from apex.fp16_utils import *
-    except ImportError:
-        raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this example.")
 
 # item() is a recent addition, so this helps with backward compatibility.
 def to_python_float(t):
@@ -445,18 +420,22 @@ class AverageMeter(object):
 
 
 def adjust_learning_rate(optimizer, epoch, step, len_epoch):
-    """LR schedule that should yield 76% converged accuracy with batch size 256"""
-    factor = epoch // 30
+    """Experimenting on my own"""
+    if 0 <= epoch < 6:
+        lr = 0.1 + 0.4 * (step / len_epoch + epoch) / 6.0
 
-    if epoch >= 80:
-        factor = factor + 1
+    elif 6 <= epoch < 12:
+        lr = 0.5 - 0.4 * (step / len_epoch + epoch - 6) / 6.0
 
-    lr = args.lr * (0.1 ** factor)
+    elif 12 <= epoch < 27:
+        lr = 0.1 - 0.09 * (step / len_epoch + epoch - 12) / 15.0
 
-    """Warmup"""
-    if epoch < 5:
-        lr = lr * float(1 + step + epoch * len_epoch) / (5. * len_epoch)
+    elif 27 <= epoch < 35:
+        lr = 0.01 - 0.009 * (step / len_epoch + epoch - 27) / 8.0
 
+    else:
+        lr = 0.001
+        
     if(args.local_rank == 0 and step % args.print_freq == 0 and step > 1):
         print("Epoch = {}, step = {}, lr = {}".format(epoch, step, lr))
 
