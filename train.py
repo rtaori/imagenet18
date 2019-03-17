@@ -37,8 +37,7 @@ def main():
 
   cmd = f'CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node={NUM_GPUS} training/train_imagenet_nv.py {training_params}'
   subprocess.run(f'echo {cmd} > {logdir}/task.cmd', shell=True, check=True)
-  print(cmd)
-  # subprocess.run(cmd, shell=True, check=True)
+  subprocess.run(cmd, shell=True, check=True)
 
 if __name__ == '__main__':
   main()

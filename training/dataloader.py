@@ -30,7 +30,7 @@ def get_loaders(traindir, valdir, sz, bs, fp16=True, val_bs=None, workers=8, dis
         num_workers=workers, pin_memory=True, collate_fn=fast_collate, 
         sampler=train_sampler)
 
-    val_dataset, val_sampler = create_validation_set(valdir, val_bs, sz, rect_val=rect_val, distributed=distributed)
+    val_dataset, val_sampler = create_validation_set(valdir, val_bs, sz, distributed=distributed)
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         num_workers=workers, pin_memory=True, collate_fn=fast_collate, 
